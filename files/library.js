@@ -1422,6 +1422,23 @@ function InnerSelf(hook) {
                 card.description = "Written automatically every turn so Inner Self can ask for a thought while"
                     + " AI Dungeon's Optimized Context setting is on, which stops scripts adding to the context."
                     + " Editing this does nothing; it is overwritten each turn. Deleting it stops thoughts.";
+                // PINNING, if this build of AI Dungeon has it.
+                //
+                // A pinned card stops competing for the story-card allowance and
+                // cannot be crowded out of a full context, which is exactly the
+                // failure this card is most exposed to. But the property's real
+                // name is undocumented and may not exist at all, so this NEVER
+                // invents a field — an unknown key could confuse whatever
+                // serialises these cards. It looks at cards AI Dungeon itself
+                // made, finds a boolean whose name reads like a pin, and sets
+                // that one. If none exists this does nothing and the trigger
+                // words carry the card exactly as before.
+                for (const name of ["pinned", "isPinned", "pin", "sticky", "alwaysOn", "alwaysActive"]) {
+                    if (storyCards.some(c => c && (typeof c[name] === "boolean"))) {
+                        card[name] = true;
+                        break;
+                    }
+                }
             } catch (error) { /* bookkeeping must never break the turn */ }
         };
         const nondirective = () => (
