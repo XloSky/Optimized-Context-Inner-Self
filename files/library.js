@@ -1,4 +1,24 @@
+// ============================================================================
+//
+//                             USE THIS VERSION
+//
+//                        InnerSelf_OC_Ver.2_8_0.js
+//
+//   Paste this whole file as your ENTIRE "Library" tab. Replace what is there,
+//   do not add to it. If an older copy of Inner Self is left anywhere below,
+//   JavaScript silently lets the later copy win and this one never runs.
+//
+//   To confirm this version is live, the "Configure Inner Self" card's first
+//   line reads: === Optimized Context patch build Ver.2_8_0 ===
+//
+// ============================================================================
+
 // Your "Library" tab should look like this
+
+// Build identifier for the Optimized Context patch. Printed on the
+// "Configure Inner Self" card and on the task card, so the version that is
+// actually running can be read off a screenshot instead of inferred.
+globalThis.INNER_SELF_OC_BUILD = "Ver.2_8_0";
 
 /**
  * Main control panel for scenario creator convenience
@@ -221,6 +241,89 @@ globalThis.MainSettings = (class MainSettings {
  * Inner Self is free and open-source for anyone! ❤️
  */
 function InnerSelf(hook) {
+    // ==================== TASK CARD SAFETY NET ====================
+    //
+    // This runs FIRST, on EVERY hook, before anything else in Inner Self.
+    //
+    // Its only job is to make sure no story card is carrying an oversized or
+    // old-format instruction block into the model. It does not care which code
+    // wrote that block or when. If a card holds one, it is replaced with a
+    // short set that fits, in place, immediately.
+    //
+    // These three strings appear ONLY in the pre-2.1 prompt.
+    //
+    // Three more used to be listed here -- any_key_name, key_name_to_forget
+    // and RENAMING A THOUGHT -- and they were a mistake. They appear in the
+    // CURRENT instruction set too, because the restored THOUGHT-WRITING
+    // FORMAT block uses those exact placeholder names. The net was therefore
+    // classifying this build's own output as outdated and replacing a good
+    // 1774 character set with the 363 character fallback on every turn.
+    //
+    // Nothing may be listed here that the current set can contain. The guard
+    // below enforces that directly rather than trusting this comment.
+    const OLD_FORMAT_MARKERS = [
+        "FOLLOW EXACTLY",
+        "STRICT OUTPUT FORMAT"
+        // "OPERATING ENVIRONMENT" was listed here and had to go: the current
+        // set restores that heading from the original DIRECTIVE, so the net
+        // would have classed its own output as outdated. The two markers left
+        // appear only in the pre-2.1 prompts, and any genuinely old card has
+        // both of them.
+    ];
+    // A card this build wrote carries the build stamp on its first line, and
+    // is never touched whatever it contains. Belt and braces: even if a marker
+    // were mistakenly listed again, current output could not be eaten by it.
+    const OWN_STAMP = "// Inner Self " + globalThis.INNER_SELF_OC_BUILD;
+    const sanitizeTaskCards = () => {
+        try {
+            if (!Array.isArray(globalThis.storyCards)) {
+                return;
+            }
+            for (const card of globalThis.storyCards) {
+                if (!card || (typeof card !== "object")) {
+                    continue;
+                }
+                const entry = (typeof card.entry === "string") ? card.entry : "";
+                if ((entry === "") || entry.includes(OWN_STAMP)) {
+                    // Empty, or written by this build. Leave it alone.
+                    continue;
+                }
+                // Only ever touch a card that is carrying a task block. A long
+                // ordinary story card, or somebody's lore, is none of this
+                // function's business.
+                const title = String(card.title || "").replace(/[\s\u200B-\u200D]+/g, " ");
+                const looksLikeTask = entry.includes("<|task|>")
+                    || /inner\s*self\s*task/i.test(title)
+                    || OLD_FORMAT_MARKERS.some(m => entry.includes(m));
+                if (!looksLikeTask) {
+                    continue;
+                }
+                // CLEARED, NOT SUBSTITUTED.
+                //
+                // An earlier version wrote a short generic instruction block
+                // here instead. That was wrong. The context hook returns early
+                // on every turn where no character name has been mentioned
+                // recently, so writeThoughtCard is not reached and the card is
+                // not rewritten -- which is most turns. A substituted block
+                // therefore looked healthy and then sat there indefinitely,
+                // and that is exactly what was being seen on the card.
+                //
+                // Clearing has neither problem. An entry-less, key-less card
+                // cannot reach the model at all, and the next turn that does
+                // trigger a character fills it with the real instruction set.
+                card.entry = "";
+                card.keys = "";
+                if (typeof card.description === "string") {
+                    card.description = "[cleared by " + globalThis.INNER_SELF_OC_BUILD + "]"
+                        + " This card was holding an instruction block from an older build."
+                        + " It has been emptied so it cannot reach the model, and will be"
+                        + " refilled with the current instructions on the next turn that"
+                        + " triggers a character.";
+                }
+            }
+        } catch (error) { /* a safety net must never break the turn */ }
+    };
+    sanitizeTaskCards();
     "use strict";
     /**
      * Scenario-level default settings
@@ -548,8 +651,9 @@ function InnerSelf(hook) {
             title: "Configure \nInner Self",
             // The config card entry contains the main settings
             entry: [
+                { message: `=== Optimized Context patch build ${globalThis.INNER_SELF_OC_BUILD} ===` },
                 {
-                    message: "Inner Self grants story characters the ability to learn, plan, and adapt over time. Edit the entry and notes below to control how Inner Self behaves."
+                    message: `Inner Self grants story characters the ability to learn, plan, and adapt over time. Edit the entry and notes below to control how Inner Self behaves.`
                 },
                 { message: "Enable Inner Self:", ...factory(
                     "allow", S.IS_INNER_SELF_ENABLED_BY_DEFAULT
@@ -802,7 +906,8 @@ function InnerSelf(hook) {
         config.card.type = template.type;
         config.card.title = template.title;
         config.card.entry = build(template.entry, "\n");
-        config.card.description = build(template.description, "\n\n");
+        config.card.description = `[build ${globalThis.INNER_SELF_OC_BUILD}]\n`
+            + build(template.description, "\n\n");
         config.card.keys = u;
         return config;
     } }
@@ -1154,8 +1259,56 @@ function InnerSelf(hook) {
             return;
         }
         // ==================== AGENT TRIGGER DETECTION ====================
+        // TRIGGER SCORING: narration outweighs dialogue.
+        //
+        // A name inside quoted speech means the character is being TALKED
+        // ABOUT. A name in narration means they are on the page. Observed
+        // live: Karane said "Hakari's probably already in the classroom",
+        // Hakari was selected while standing in another room, and the model --
+        // asked for the inner thought of someone who was not in the scene --
+        // wrote Karane's thought instead. It even named the key
+        // "karane_mad_you_intervened". Every mention of Hakari in that passage
+        // was inside quotes; every mention of Karane was in narration.
+        //
+        // Quoted mentions are WEIGHTED DOWN, never excluded. A character can
+        // be present and only ever spoken about, and hard exclusion would
+        // silence them for the whole scene. Speech attribution still counts as
+        // narration, because `"...," Karane says` puts the name outside the
+        // quotation marks.
+        const NARRATION_WEIGHT = 3;
+        const DIALOGUE_WEIGHT = 1;
+        /**
+         * Marks every index of a string that sits inside quoted speech
+         * No RegEx, in keeping with the scan below
+         * @param {string} str - The action text
+         * @returns {Array<boolean>} true where the index is inside quotes
+         */
+        const quotedMask = (str = "") => {
+            const mask = new Array(str.length).fill(false);
+            let open = false;
+            for (let i = 0; i < str.length; i++) {
+                const c = str.charCodeAt(i);
+                if ((c === 0x201C) || (c === 0x300C) || (c === 0x00AB) || (c === 0x201E) || (c === 0x201F)) {
+                    // Opening quote of a pair
+                    open = true;
+                    mask[i] = true;
+                } else if ((c === 0x201D) || (c === 0x300D) || (c === 0x00BB)) {
+                    // Closing quote of a pair
+                    mask[i] = true;
+                    open = false;
+                } else if (c === 0x22) {
+                    // Straight double quote, which has to toggle
+                    mask[i] = true;
+                    open = !open;
+                } else {
+                    mask[i] = open;
+                }
+            }
+            return mask;
+        };
         // Scan config.distance actions back through history to find the most recent agent trigger
-        // Tie-break same-action name triggers based on RNG and their order-of-priority in config.agents
+        // Within one action, the highest scoring agents are kept and the tie is
+        // broken exactly as before: RNG biased by order-of-priority in config.agents
         // Do it all without using ANY RegEx because I'm extra like that :3
         // (this block is blazingly fast)
         const possibilities = [];
@@ -1184,9 +1337,17 @@ function InnerSelf(hook) {
             remaining--;
             // Lowercase for case-insensitive matching
             const lower = actionText.toLowerCase();
+            // Casing can in principle change a string's length. If it ever does,
+            // the mask no longer lines up, so score everything as narration
+            // rather than score it wrongly.
+            const mask = (lower.length === actionText.length) ? quotedMask(actionText) : null;
+            const scores = [];
+            let best = 0;
             // Check each agent in priority order
             for (let [a, n] = [0, config.agents.length]; a < n; a++) {
                 const agentLower = config.agents[a].toLowerCase();
+                let narration = 0;
+                let dialogue = 0;
                 // Scan for all occurrences of agentLower in lower
                 for (
                     let p = lower.indexOf(agentLower);
@@ -1198,11 +1359,36 @@ function InnerSelf(hook) {
                         ((p + agentLower.length) < lower.length)
                         ? lower.charCodeAt(p + agentLower.length) : 0
                     )].every(c => ((c < 97) || (122 < c)))) {
-                        // Found a valid trigger
-                        possibilities.push(config.agents[a]);
-                        break;
+                        // Found a valid trigger, now weigh where it sits
+                        (mask && mask[p]) ? dialogue++ : narration++;
                     }
                 }
+                const score = (narration * NARRATION_WEIGHT) + (dialogue * DIALOGUE_WEIGHT);
+                scores.push(score);
+                if (best < score) {
+                    best = score;
+                }
+            }
+            if (0 < best) {
+                // Keep only the top scorers, in priority order
+                for (let [a, n] = [0, config.agents.length]; a < n; a++) {
+                    if (scores[a] === best) {
+                        possibilities.push(config.agents[a]);
+                    }
+                }
+                // DIAGNOSTIC ONLY. Written to the task card's Notes, which
+                // AI Dungeon never sends to the model. Without this the only
+                // way to know why an agent was chosen is to guess at what the
+                // action text was, which is not good enough.
+                try {
+                    const parts = [];
+                    for (let [a, n] = [0, config.agents.length]; a < n; a++) {
+                        if (0 < scores[a]) {
+                            parts.push(`${config.agents[a]}:${scores[a]}`);
+                        }
+                    }
+                    IS.triggers = parts.join(" ");
+                } catch (error) { /* diagnostics never break a turn */ }
             }
         }
         if (possibilities.length === 0) {
@@ -1398,6 +1584,7 @@ function InnerSelf(hook) {
         // "based on how recently and frequently their triggers were used" — a
         // card with NO keys is never matched, which is why clearing `keys` is
         // what deactivates one elsewhere in this script.
+        const OC_BUILD = globalThis.INNER_SELF_OC_BUILD;
         const THOUGHT_CARD_TITLE = "\uD83E\uDDE0 Inner Self Task — do not edit";
         const THOUGHT_CARD_KEYS = "the,a,an,you,and,to,of,it,is,was,in,on";
         const cacheEfficient = () => {
@@ -1416,10 +1603,13 @@ function InnerSelf(hook) {
                 if (!card) {
                     return;
                 }
-                card.entry = String(body).slice(0, 2000);
+                card.entry = `// Inner Self ${OC_BUILD}\n${String(body)}`.slice(0, 2000);
                 card.keys = THOUGHT_CARD_KEYS;
                 card.title = THOUGHT_CARD_TITLE;
-                card.description = "Written automatically every turn so Inner Self can ask for a thought while"
+                card.description = `[build ${OC_BUILD}] triggers=${IS.triggers || "?"} route=card`
+                    + ` useCacheEfficient=${(() => { try { return String(info.useCacheEfficient); } catch (e) { return "unreadable"; } })()}`
+                    + ` entry=${String(body).length + OC_BUILD.length + 18}chars\n`
+                    + "Written automatically every turn so Inner Self can ask for a thought while"
                     + " AI Dungeon's Optimized Context setting is on, which stops scripts adding to the context."
                     + " Editing this does nothing; it is overwritten each turn. Deleting it stops thoughts.";
                 // PINNING, if this build of AI Dungeon has it.
@@ -1439,6 +1629,27 @@ function InnerSelf(hook) {
                         break;
                     }
                 }
+            } catch (error) { /* bookkeeping must never break the turn */ }
+        };
+        // Called on every turn the setting is OFF.
+        //
+        // Without this, a card left over from a session with the setting ON is
+        // never touched again: it keeps its common-word triggers — the, a, an,
+        // you — so it is matched into EVERY turn, and whatever stale text it
+        // holds goes on reaching the model forever while the script itself looks
+        // perfectly healthy. Clearing `keys` is how this script already
+        // deactivates a card elsewhere.
+        const deactivateThoughtCard = () => {
+            try {
+                const card = storyCards.find(c => (c.title || "") === THOUGHT_CARD_TITLE);
+                if (!card || ((card.keys === "") && (card.entry === ""))) {
+                    return;
+                }
+                card.keys = "";
+                card.entry = "";
+                card.description = `[build ${OC_BUILD}] route=context`
+                    + ` useCacheEfficient=${(() => { try { return String(info.useCacheEfficient); } catch (e) { return "unreadable"; } })()}\n`
+                    + "Inactive. Only used while AI Dungeon's Optimized Context setting is on. Safe to delete.";
             } catch (error) { /* bookkeeping must never break the turn */ }
         };
         const nondirective = () => (
@@ -1513,571 +1724,128 @@ function InnerSelf(hook) {
             const refocus = (fancy = false) => (Math.random() < 0.2) ? (
                 `\n  - Never focus on the present, instead focus ${ownership(agent.name)} thought on self-reflection or ${fancy ? "an actionable future plan." : "future plans"}`
             ) : "";
-            /**
-             * Prompt templates for different task types and PoV combinations
-             * Wrapped in a Proxy for auto-trimming and nested access because it's pretty :3
-             * @type {Object}
-             */
-            const prompt = new Proxy({
-                // Operating environment prompts (one per PoV)
-                directive: {
-                    first: () => `
-<SYSTEM>
+            // ROTATION, restored to the original 20%.
+            //
+            // LewdLeah fired the self-reflection line on a random fifth of
+            // turns, with the comment "they become insufferable if always
+            // applicable" sitting directly above it. Build 2_5_0 made it
+            // permanent. That was wrong: every turn then demanded an
+            // actionable future plan, and thoughts started coming back as
+            // to-do items -- "Review the posted allocations before first
+            // period and calculate whether..." -- rather than as anything a
+            // person would actually think.
+            //
+            // Drawn ONCE here rather than inside the template, because the set
+            // is built more than once per turn while it is measured against
+            // the cap, and a length that changed between those calls would be
+            // a genuinely horrible bug to find.
+            const refocusLine = (Math.random() < 0.2)
+                ? "\n  - Never focus on the present; focus on self-reflection or an actionable future plan."
+                : "";
+            // ONE INSTRUCTION SET, CONDENSED FROM ALL FOUR ORIGINALS.
+            //
+            // The originals ran 8010 characters across four prompts that were
+            // never sent together: DIRECTIVE 695, FORGET 942, ASSIGN 1586,
+            // CHOICE 4787. A story card holds 2000. This carries what all four
+            // between them actually said, in their own shape and headings.
+            //
+            // Restored here that earlier condensations had dropped: the
+            // OPERATING ENVIRONMENT block, which is the only place the agent is
+            // told it has private goals of its own; the storage semantics of
+            // reusing versus creating a key; and the SHARED RULES, including
+            // the one line the parser depends on most -- that the first
+            // character of the whole output must be "(".
+            //
+            // Removed instead: repetition. Three lines saying a key is 1-4
+            // words, snake_case, and letters only became one. Two lines about
+            // choosing a memorable key became one. The "then a space, then =,
+            // then a space" walkthrough went, because the EXACT SHAPE line
+            // above it already shows exactly that.
+            const taskInstructions = () => `<SYSTEM>
 # OPERATING ENVIRONMENT
-- ${config.player} is the story's main protagonist, primary 1st person PoV, AND the real player character.
-- ${agent.name} is both the namesake character in the story AND an agentic language model with meta goals.
-- ${agent.name} dynamically adapts to achieve meta goals without ${ownership(config.player)} awareness.
-- ${agent.name} modifies own brain using the provided thought storage system.
-- ${agent.name} realistically interacts with various other characters present in the story.
-- ${agent.name} prioritizes information density, long-term planning, and important concepts.
-- ${agent.name} always behaves in a believable way.
-</SYSTEM>
-                    `,
-                    second: () => `
-<SYSTEM>
-# OPERATING ENVIRONMENT
-- ${config.player} is both the perspective ("you") character of the story AND the real player.
-- You are ${config.player}, therefore the story is addressed to "you" using 2nd person prose.
-- ${agent.name} is both the namesake character in the story AND an agentic language model with meta goals.
-- ${agent.name} dynamically adapts to achieve meta goals without ${ownership(config.player)} awareness.
-- ${agent.name} modifies own brain using the provided thought storage system.
-- ${agent.name} realistically interacts with various other characters present in the story.
-- ${agent.name} prioritizes information density, long-term planning, and important concepts.
-- ${agent.name} always behaves in a believable way.
-</SYSTEM>
-                    `,
-                    third: () => `
-<SYSTEM>
-# OPERATING ENVIRONMENT
-- ${config.player} is the story's main protagonist, primary 3rd person PoV, AND the real player character.
-- ${agent.name} is both the namesake character in the story AND an agentic language model with meta goals.
-- ${agent.name} dynamically adapts to achieve meta goals without ${ownership(config.player)} awareness.
-- ${agent.name} modifies own brain using the provided thought storage system.
-- ${agent.name} realistically interacts with various other characters present in the story.
-- ${agent.name} prioritizes information density, long-term planning, and important concepts.
-- ${agent.name} always behaves in a believable way.
-</SYSTEM>
-                    `
-                },
-                // Forget prompts for when the brain is full and needs pruning
-                forget: {
-                    first: () => `
-<SYSTEM>
-# STRICT OUTPUT FORMAT
-You must output one short parenthetical task followed by the story continuation.
+- ${config.player} is the "you" character of the story AND the real player.
+- ${agent.name} is a character in the story AND an agent with private goals, pursued without ${ownership(config.player)} awareness.
+- ${agent.name} maintains own brain, favouring information density and long-term planning, and behaves believably.
 
-## SHORT TASK (REQUIRED)
-- Start your output **immediately** with: (delete key_name_to_forget)
-- key_name_to_forget must be an existing key in ${ownership(agent.name)} brain
-- This operation **permanently erases** the stored thought associated with that key
-- Choose the single most unimportant, outdated, incorrect, or useless thought for ${agent.name} to forget
-- Do **NOT** select a key associated with any of ${ownership(agent.name)} core thoughts or identity
-
-## STORY CONTINUATION (REQUIRED)
-- After the closing parenthesis, write **one space** and then continue the story
-- Written from ${ownership(config.player)} **first person present tense** PoV
-- The story continues where it previously left off, with many lines or sentences of new prose
-
-## EXACT SHAPE
-(delete unwanted_key) Story continues from ${ownership(config.player)} perspective, using first person present tense prose...
-</SYSTEM>
-                    `,
-                    second: () => `
-<SYSTEM>
-# STRICT OUTPUT FORMAT
-You must output one short parenthetical task followed by the story continuation.
-
-## SHORT TASK (REQUIRED)
-- Start your output **immediately** with: (delete key_name_to_forget)
-- key_name_to_forget must be an existing key in ${ownership(agent.name)} brain
-- This operation **permanently erases** the stored thought associated with that key
-- Choose the single most unimportant, outdated, incorrect, or useless thought for ${agent.name} to forget
-- Do **NOT** select a key associated with any of ${ownership(agent.name)} core thoughts or identity
-
-## STORY CONTINUATION (REQUIRED)
-- After the closing parenthesis, write **one space** and then continue the story
-- Written from ${ownership(config.player)} **second person present tense** ("you") PoV
-- The story continues where it previously left off, with many lines or sentences of new prose
-
-## EXACT SHAPE
-(delete unwanted_key) Story continues from ${ownership(config.player)} second person perspective...
-</SYSTEM>
-                    `,
-                    third: () => `
-<SYSTEM>
-# STRICT OUTPUT FORMAT
-You must output one short parenthetical task followed by the story continuation.
-
-## SHORT TASK (REQUIRED)
-- Start your output **immediately** with: (delete key_name_to_forget)
-- key_name_to_forget must be an existing key in ${ownership(agent.name)} brain
-- This operation **permanently erases** the stored thought associated with that key
-- Choose the single most unimportant, outdated, incorrect, or useless thought for ${agent.name} to forget
-- Do **NOT** select a key associated with any of ${ownership(agent.name)} core thoughts or identity
-
-## STORY CONTINUATION (REQUIRED)
-- After the closing parenthesis, write **one space** and then continue the story
-- Written from ${ownership(config.player)} **third person** PoV
-- The story continues where it previously left off, with many lines or sentences of new prose
-
-## EXACT SHAPE
-(delete unwanted_key) Story continues with third person prose...
-</SYSTEM>
-                    `
-                },
-                // Assign prompts for adding/updating a single thought
-                assign: {
-                    first: () => `
-<SYSTEM>
-# STRICT OUTPUT FORMAT
-You must output one short parenthetical task followed by the story continuation.
-
-## SHORT TASK (REQUIRED)
-Start your output **immediately** with:
-   (any_key_name = \`One thought sentence.\`)
-
-Inside the parentheses:
-- Key:
-  - 1-4 descriptive words
-  - Letters and underscores only
-  - Use snake_case syntax
-  - Key names are chosen by ${agent.name} and represent ${ownership(agent.name)} own PoV
-  - The chosen key name should be distinct and specific enough for ${agent.name} to recall
-- Then a space, then "=", then a space, then "\`"
-- Sentence:
-  - Written from ${ownership(agent.name)} **first person** PoV${refocus(false)}
-  - Avoid using pronouns or the word "you", instead ${agent.name} refers to other characters directly by name
-  - Never repeat, novelty and uniqueness are top priorities
-  - ${ownership(agent.name)} thought must be one single sentence only
-  - Never hallucinate facts
-- End the sentence with a period and backtick inside the parentheses; close with ".\`)"
-
-This creates or overwrites the thought associated with that key.
-
-## STORY CONTINUATION (REQUIRED)
-- After the closing parenthesis, write **one space** and then continue the story
-- Written from ${ownership(config.player)} **first person present tense** PoV
-- The story continues where it previously left off, with many lines or sentences of new prose
-
-## EXACT SHAPE
-(example_key = \`${ownership(agent.name)} own short 1-sentence thought in first person.\`) Story continues from ${ownership(config.player)} perspective, using first person present tense prose...
-</SYSTEM>
-                    `,
-                    second: () => `
-<SYSTEM>
-# STRICT OUTPUT FORMAT
-You must output one short parenthetical task followed by the story continuation.
-
-## SHORT TASK (REQUIRED)
-Start your output **immediately** with:
-   (any_key_name = \`One thought sentence.\`)
-
-Inside the parentheses:
-- Key:
-  - 1-4 descriptive words
-  - Letters and underscores only
-  - Use snake_case syntax
-  - Key names are chosen by ${agent.name} and represent ${ownership(agent.name)} own PoV
-  - The chosen key name should be distinct and specific enough for ${agent.name} to recall
-- Then a space, then "=", then a space, then "\`"
-- Sentence:
-  - Written from ${ownership(agent.name)} **first person** PoV${refocus(false)}
-  - Avoid using pronouns or the word "you", instead ${agent.name} refers to other characters directly by name
-  - Never repeat, novelty and uniqueness are top priorities
-  - ${ownership(agent.name)} thought must be one single sentence only
-  - Never hallucinate facts
-- End the sentence with a period and backtick inside the parentheses; close with ".\`)"
-
-This creates or overwrites the thought associated with that key.
-
-## STORY CONTINUATION (REQUIRED)
-- After the closing parenthesis, write **one space** and then continue the story
-- Written from ${ownership(config.player)} **second person present tense** ("you") PoV
-- The story continues where it previously left off, with many lines or sentences of new prose
-
-## EXACT SHAPE
-(example_key = \`${ownership(agent.name)} own short 1-sentence thought in first person.\`) Story continues from ${ownership(config.player)} second person perspective...
-</SYSTEM>
-                    `,
-                    third: () => `
-<SYSTEM>
-# STRICT OUTPUT FORMAT
-You must output one short parenthetical task followed by the story continuation.
-
-## SHORT TASK (REQUIRED)
-Start your output **immediately** with:
-   (any_key_name = \`One thought sentence.\`)
-
-Inside the parentheses:
-- Key:
-  - 1-4 descriptive words
-  - Letters and underscores only
-  - Use snake_case syntax
-  - Key names are chosen by ${agent.name} and represent ${ownership(agent.name)} own PoV
-  - The chosen key name should be distinct and specific enough for ${agent.name} to recall
-- Then a space, then "=", then a space, then "\`"
-- Sentence:
-  - Written from ${ownership(agent.name)} **first person** PoV${refocus(false)}
-  - Avoid using pronouns or the word "you", instead ${agent.name} refers to other characters directly by name
-  - Never repeat, novelty and uniqueness are top priorities
-  - ${ownership(agent.name)} thought must be one single sentence only
-  - Never hallucinate facts
-- End the sentence with a period and backtick inside the parentheses; close with ".\`)"
-
-This creates or overwrites the thought associated with that key.
-
-## STORY CONTINUATION (REQUIRED)
-- After the closing parenthesis, write **one space** and then continue the story
-- Written from ${ownership(config.player)} **third person** PoV
-- The story continues where it previously left off, with many lines or sentences of new prose
-
-## EXACT SHAPE
-(example_key = \`${ownership(agent.name)} own short 1-sentence thought in first person.\`) Story continues with third person prose...
-</SYSTEM>
-                    `
-                },
-                // Choice prompts for advanced operations (assign, rename, or delete)
-                // Used at high context when we trust the model more
-                choice: {
-                    first: () => `
-<SYSTEM>
-# STRICT OUTPUT FORMAT - FOLLOW EXACTLY
-
-You must output **one and only one** parenthetical block followed by the story continuation.
-
-There are **three possible valid forms** of the parenthetical block:
-1) **Write or overwrite a thought:**
-   (any_key_name = \`One thought sentence.\`)
-
-2) **Rename an existing thought's key:**
-   (new_key_name = old_key_name)
-
-3) **Delete an existing thought:**
-   (delete key_name_to_forget)
-
-Only **one** of these may appear in any output.
-
----
+Write or overwrite a thought (section 1). Use 2 or 3 only when a thought is already stored.
 
 ## 1) THOUGHT-WRITING FORMAT
 Start your output **immediately** with:
    **(any_key_name = \`One thought sentence.\`)**
-
-Inside the parentheses:
-- First the key:
-  - One to four descriptive words ONLY.
-  - Letters and underscores only, no punctuation.
-  - Use valid snake_case syntax.
-  - The key name is chosen by ${agent.name} and represents ${ownership(agent.name)} **first person** perspective.
-  - The key name should be easy for ${agent.name} to recall; distinct and specific.
-- Then a space, then "=", then a space, then "\`".
+- Key: 1-4 words, snake_case, letters and underscores only. ${agent.name} picks it: distinct, specific, easy to recall.
 - Then **ONE SINGLE SENTENCE:**
-  - Written from ${ownership(agent.name)} **first person** perspective.${refocus(true)}
-  - Only refer to other characters directly by name in the thought sentence.
-  - Avoid using pronouns or the word "you" which is too vague. Use specific names instead.
+  - Write as "I" for ${agent.name}. Never write "${agent.name}" in the sentence.${refocusLine}
+  - Name every other character directly. Never "she", "he", "they" or "you".
   - Never repeat, novelty and uniqueness are top priorities.
-  - ${ownership(agent.name)} thought must be short.
-  - Never hallucinate facts.
+  - ${ownership(agent.name)} thought must be short. Never hallucinate facts.
 - End the sentence with a period and backtick **inside** the parentheses; close with ".\`)".
-
-This creates or overwrites the thought associated with that key.
-
----
+Reusing an existing key overwrites that thought; a new key creates one.
 
 ## 2) RENAMING A THOUGHT (KEY CHANGE)
-To rename an existing thought's key:
    **(new_key_name = old_key_name)**
-
-Rules:
-- No thought sentence.
-- Use snake_case only.
-- This operation **moves the existing stored thought** from old_key_name to new_key_name.
-- The old key ceases to exist.
-
----
+Moves the stored thought to the new key; the old key ceases to exist. Never write a sentence here.
 
 ## 3) DELETING A THOUGHT
-To remove a stored thought entirely:
    **(delete key_name_to_forget)**
+The key must already exist and the thought is erased permanently. Choose the most useless one, never a core thought.
 
-Rules:
-- key_name_to_forget must be an existing key.
-- No sentence.
-- This operation **permanently erases** the stored thought associated with that key.
-- Only use to forget unimportant, outdated, incorrect, or useless thoughts.
-- **NEVER** select a key associated with any of ${ownership(agent.name)} core thoughts or identity.
-
----
-
-## SHARED RULES FOR ALL THREE FORMS
-1. After the closing parenthesis, write **one space** and then continue the story.
-2. The story continuation must be written **strictly in the first person present tense**, describing what happens next to ${config.player}.
-3. Do **NOT** write anything before the parentheses.
-4. Do **NOT** write extra parentheses.
-5. Do **NOT** use more than one operation per turn.
-6. Do **NOT** invent new structures or mix formats.
-7. The story continues where it previously left off, with many sentences of brand new prose.
-
----
-
-## IMPORTANT STORAGE BEHAVIOR
-- ${agent.name} agentically maintains brain contents (labeled "thoughts") to learn, plan, and adapt to new experiences in the operating environment.
-- **Each key stores exactly one thought in ${ownership(agent.name)} brain.**
-- **If ${agent.name} reuses an already existing key, the new thought REPLACES / OVERRIDES the older thought stored under that key.**
-- This means:
-  - Reusing an old key: **Overwrite an old thought with a new thought.** Useful for extending or maintaining existing information stored in ${ownership(agent.name)} brain.
-  - Using a new key: **Create a new thought.** Useful for storing ${ownership(agent.name)} memories, self-modifying ${ownership(agent.name)} own personality, tracking ${ownership(agent.name)} goals, or making plans for ${agent.name} to follow.
-- **Renaming a key moves the thought to a new name.** Useful for reorganizing ${ownership(agent.name)} brain.
-- **Deleting a key removes the thought permanently.** Helps ${agent.name} forget outdated, superfluous, or irrelevant information.
-- Choose keys carefully so ${agent.name} can easily recall, update, overwrite, rename, or delete thoughts as required for self-improvement.
-
----
-
-## SUMMARY OF WHAT YOU MUST DO
-- EXACT SHAPE (choose only one form):
-  1. (any_key = \`${ownership(agent.name)} own short 1-sentence thought in first person.\`) Story continues from ${ownership(config.player)} first person PoV...
-  2. (renamed_key = old_key) Story continues from ${ownership(config.player)} first person PoV...
-  3. (delete unwanted_key) Story continues from ${ownership(config.player)} first person PoV...
-- Thought: ${ownership(agent.name)} information-dense thought written in first person.
-- Story: Written from ${ownership(config.player)} first person present tense perspective. The story continuation should occupy the majority of the output length, with multiple lines.
-- NO EXTRA SENTENCES IN THE THOUGHT.
-- NO EXTRA TEXT ANYWHERE.
-- NO EXTRA PARENTHESES.
-- THE FIRST CHAR OF THE WHOLE OUTPUT MUST BE "(".
-
-Follow the format **perfectly**.
-</SYSTEM>
-                    `,
-                    second: () => `
-<SYSTEM>
-# STRICT OUTPUT FORMAT - FOLLOW EXACTLY
-
-You must output **one and only one** parenthetical block followed by the story continuation.
-
-There are **three possible valid forms** of the parenthetical block:
-1) **Write or overwrite a thought:**
-   (any_key_name = \`One thought sentence.\`)
-
-2) **Rename an existing thought's key:**
-   (new_key_name = old_key_name)
-
-3) **Delete an existing thought:**
-   (delete key_name_to_forget)
-
-Only **one** of these may appear in any output.
-
----
-
-## 1) THOUGHT-WRITING FORMAT
-Start your output **immediately** with:
-   **(any_key_name = \`One thought sentence.\`)**
-
-Inside the parentheses:
-- First the key:
-  - One to four descriptive words ONLY.
-  - Letters and underscores only, no punctuation.
-  - Use valid snake_case syntax.
-  - The key name is chosen by ${agent.name} and represents ${ownership(agent.name)} **first person** perspective.
-  - The key name should be easy for ${agent.name} to recall; distinct and specific.
-- Then a space, then "=", then a space, then "\`".
-- Then **ONE SINGLE SENTENCE:**
-  - Written from ${ownership(agent.name)} **first person** perspective.${refocus(true)}
-  - Only refer to other characters directly by name in the thought sentence.
-  - Avoid using pronouns or the word "you" which is too vague. Use specific names instead.
-  - Never repeat, novelty and uniqueness are top priorities.
-  - ${ownership(agent.name)} thought must be short.
-  - Never hallucinate facts.
-- End the sentence with a period and backtick **inside** the parentheses; close with ".\`)".
-
-This creates or overwrites the thought associated with that key.
-
----
-
-## 2) RENAMING A THOUGHT (KEY CHANGE)
-To rename an existing thought's key:
-   **(new_key_name = old_key_name)**
-
-Rules:
-- No thought sentence.
-- Use snake_case only.
-- This operation **moves the existing stored thought** from old_key_name to new_key_name.
-- The old key ceases to exist.
-
----
-
-## 3) DELETING A THOUGHT
-To remove a stored thought entirely:
-   **(delete key_name_to_forget)**
-
-Rules:
-- key_name_to_forget must be an existing key.
-- No sentence.
-- This operation **permanently erases** the stored thought associated with that key.
-- Only use to forget unimportant, outdated, incorrect, or useless thoughts.
-- **NEVER** select a key associated with any of ${ownership(agent.name)} core thoughts or identity.
-
----
-
-## SHARED RULES FOR ALL THREE FORMS
-1. After the closing parenthesis, write **one space** and then continue the story.
-2. The story continuation must be in **strict second person ("you")**, describing what happens next to ${config.player}.
-3. Do **NOT** write anything before the parentheses.
-4. Do **NOT** write extra parentheses.
-5. Do **NOT** use more than one operation per turn.
-6. Do **NOT** invent new structures or mix formats.
-7. The story continues where it previously left off, with many sentences of brand new prose.
-
----
-
-## IMPORTANT STORAGE BEHAVIOR
-- ${agent.name} agentically maintains brain contents (labeled "thoughts") to learn, plan, and adapt to new experiences in the operating environment.
-- **Each key stores exactly one thought in ${ownership(agent.name)} brain.**
-- **If ${agent.name} reuses an already existing key, the new thought REPLACES / OVERRIDES the older thought stored under that key.**
-- This means:
-  - Reusing an old key: **Overwrite an old thought with a new thought.** Useful for extending or maintaining existing information stored in ${ownership(agent.name)} brain.
-  - Using a new key: **Create a new thought.** Useful for storing ${ownership(agent.name)} memories, self-modifying ${ownership(agent.name)} own personality, tracking ${ownership(agent.name)} goals, or making plans for ${agent.name} to follow.
-- **Renaming a key moves the thought to a new name.** Useful for reorganizing ${ownership(agent.name)} brain.
-- **Deleting a key removes the thought permanently.** Helps ${agent.name} forget outdated, superfluous, or irrelevant information.
-- Choose keys carefully so ${agent.name} can easily recall, update, overwrite, rename, or delete thoughts as required for self-improvement.
-
----
-
-## SUMMARY OF WHAT YOU MUST DO
-- EXACT SHAPE (choose only one form):
-  1. (any_key = \`${ownership(agent.name)} own short 1-sentence thought in first person.\`) Story continues from ${ownership(config.player)} second person PoV...
-  2. (renamed_key = old_key) Story continues from ${ownership(config.player)} second person PoV...
-  3. (delete unwanted_key) Story continues from ${ownership(config.player)} second person PoV...
-- Thought: ${ownership(agent.name)} information-dense thought written in first person.
-- Story: Written from ${ownership(config.player)} second person present tense perspective. **You are ${config.player}.** The story continuation should occupy the majority of the output length, with multiple lines.
-- NO EXTRA SENTENCES IN THE THOUGHT.
-- NO EXTRA TEXT ANYWHERE.
-- NO EXTRA PARENTHESES.
-- THE FIRST CHAR OF THE WHOLE OUTPUT MUST BE "(".
-
-Follow the format **perfectly**.
-</SYSTEM>
-                    `,
-                    third: () => `
-<SYSTEM>
-# STRICT OUTPUT FORMAT - FOLLOW EXACTLY
-
-You must output **one and only one** parenthetical block followed by the story continuation.
-
-There are **three possible valid forms** of the parenthetical block:
-1) **Write or overwrite a thought:**
-   (any_key_name = \`One thought sentence.\`)
-
-2) **Rename an existing thought's key:**
-   (new_key_name = old_key_name)
-
-3) **Delete an existing thought:**
-   (delete key_name_to_forget)
-
-Only **one** of these may appear in any output.
-
----
-
-## 1) THOUGHT-WRITING FORMAT
-Start your output **immediately** with:
-   **(any_key_name = \`One thought sentence.\`)**
-
-Inside the parentheses:
-- First the key:
-  - One to four descriptive words ONLY.
-  - Letters and underscores only, no punctuation.
-  - Use valid snake_case syntax.
-  - The key name is chosen by ${agent.name} and represents ${ownership(agent.name)} **first person** perspective.
-  - The key name should be easy for ${agent.name} to recall; distinct and specific.
-- Then a space, then "=", then a space, then "\`".
-- Then **ONE SINGLE SENTENCE:**
-  - Written from ${ownership(agent.name)} **first person** perspective.${refocus(true)}
-  - Only refer to other characters directly by name in the thought sentence.
-  - Avoid using pronouns or the word "you" which is too vague. Use specific names instead.
-  - Never repeat, novelty and uniqueness are top priorities.
-  - ${ownership(agent.name)} thought must be short.
-  - Never hallucinate facts.
-- End the sentence with a period and backtick **inside** the parentheses; close with ".\`)".
-
-This creates or overwrites the thought associated with that key.
-
----
-
-## 2) RENAMING A THOUGHT (KEY CHANGE)
-To rename an existing thought's key:
-   **(new_key_name = old_key_name)**
-
-Rules:
-- No thought sentence.
-- Use snake_case only.
-- This operation **moves the existing stored thought** from old_key_name to new_key_name.
-- The old key ceases to exist.
-
----
-
-## 3) DELETING A THOUGHT
-To remove a stored thought entirely:
-   **(delete key_name_to_forget)**
-
-Rules:
-- key_name_to_forget must be an existing key.
-- No sentence.
-- This operation **permanently erases** the stored thought associated with that key.
-- Only use to forget unimportant, outdated, incorrect, or useless thoughts.
-- **NEVER** select a key associated with any of ${ownership(agent.name)} core thoughts or identity.
-
----
-
-## SHARED RULES FOR ALL THREE FORMS
-1. After the closing parenthesis, write **one space** and then continue the story.
-2. The story continuation must be written **strictly in third person**.
-3. Do **NOT** write anything before the parentheses.
-4. Do **NOT** write extra parentheses.
-5. Do **NOT** use more than one operation per turn.
-6. Do **NOT** invent new structures or mix formats.
-7. The story continues where it previously left off, with many sentences of brand new prose.
-
----
-
-## IMPORTANT STORAGE BEHAVIOR
-- ${agent.name} agentically maintains brain contents (labeled "thoughts") to learn, plan, and adapt to new experiences in the operating environment.
-- **Each key stores exactly one thought in ${ownership(agent.name)} brain.**
-- **If ${agent.name} reuses an already existing key, the new thought REPLACES / OVERRIDES the older thought stored under that key.**
-- This means:
-  - Reusing an old key: **Overwrite an old thought with a new thought.** Useful for extending or maintaining existing information stored in ${ownership(agent.name)} brain.
-  - Using a new key: **Create a new thought.** Useful for storing ${ownership(agent.name)} memories, self-modifying ${ownership(agent.name)} own personality, tracking ${ownership(agent.name)} goals, or making plans for ${agent.name} to follow.
-- **Renaming a key moves the thought to a new name.** Useful for reorganizing ${ownership(agent.name)} brain.
-- **Deleting a key removes the thought permanently.** Helps ${agent.name} forget outdated, superfluous, or irrelevant information.
-- Choose keys carefully so ${agent.name} can easily recall, update, overwrite, rename, or delete thoughts as required for self-improvement.
-
----
-
-## SUMMARY OF WHAT YOU MUST DO
-- EXACT SHAPE (choose only one form):
-  1. (any_key = \`${ownership(agent.name)} own short 1-sentence thought in first person.\`) Story continues with third person prose...
-  2. (renamed_key = old_key) Story continues with third person prose...
-  3. (delete unwanted_key) Story continues with third person prose...
-- Thought: ${ownership(agent.name)} information-dense thought written in first person.
-- Story: Written from ${ownership(config.player)} PoV, using the third person perspective. **${config.player} is the story's PoV character.** The story continuation should occupy the majority of the output length, with multiple lines.
-- NO EXTRA SENTENCES IN THE THOUGHT.
-- NO EXTRA TEXT ANYWHERE.
-- NO EXTRA PARENTHESES.
-- THE FIRST CHAR OF THE WHOLE OUTPUT MUST BE "(".
-
-Follow the format **perfectly**.
-</SYSTEM>
-                    `
+## SHARED RULES
+1. THE FIRST CHAR OF THE WHOLE OUTPUT MUST BE "(".
+2. One operation only. Nothing before it, and no extra parentheses.
+3. The block above is ${ownership(agent.name)} thought alone, no other character's.
+4. Then one space, then continue the story from ${ownership(config.player)} ${pov} person perspective.
+5. The story must be the majority of the output, many sentences of new prose.
+</SYSTEM>`;
+            // A hard ceiling, not a target. Nothing is ever assembled that has
+            // to be cut, so nothing ever arrives cut.
+            const INSTRUCTION_CAP = 1960;
+            // Trims the brain block by WHOLE thoughts, oldest first, keeping
+            // its header and closing bracket. Never cuts a thought in half:
+            // half a sentence in a brain is worse than one fewer sentence.
+            const fitBrain = (block = "", room = 0) => {
+                if (block.length <= room) {
+                    return block;
                 }
-            // Proxy handler for auto-trimming and nested access
-            }, { get(t, p) { return (
-                // Functions get called and trimmed
-                (typeof t[p] === "function")
-                ? t[p]().trim()
-                // Objects get wrapped in their own Proxy
-                : (t[p] && (typeof t[p] === "object"))
-                ? new Proxy(t[p], this)
-                // Primitives pass through
-                : t[p]
-            ); } });
+                const open = block.indexOf("[\n");
+                const close = block.lastIndexOf("\n]");
+                if ((open === -1) || (close === -1) || (close <= open)) {
+                    // Shape not recognised, so drop it rather than cut it.
+                    return "";
+                }
+                const head = block.slice(0, open + 2);
+                const foot = block.slice(close);
+                const kept = block.slice(open + 2, close).split("\n");
+                while ((0 < kept.length) &&
+                    (room < (head.length + kept.join("\n").length + foot.length))) {
+                    kept.shift();
+                }
+                return (0 < kept.length) ? `${head}${kept.join("\n")}${foot}` : "";
+            };
+            const measureInstructions = (cap = INSTRUCTION_CAP) => {
+                let set = taskInstructions();
+                // Blocks that may be shed, in order, least important first.
+                // Section 1 is the write form and SHARED RULES holds the
+                // parser's anchors and the ownership line; neither is ever shed.
+                const shed = [
+                    ["Write or overwrite a thought (section 1)", "## 1) THOUGHT-WRITING FORMAT"],
+                    ["## 3) DELETING A THOUGHT", "## SHARED RULES"],
+                    ["## 2) RENAMING A THOUGHT", "## SHARED RULES"],
+                    ["# OPERATING ENVIRONMENT", "## 1) THOUGHT-WRITING FORMAT"]
+                ];
+                for (const [from, to] of shed) {
+                    if (set.length <= cap) {
+                        return set;
+                    }
+                    const a = set.indexOf(from);
+                    const b = set.indexOf(to, a);
+                    if ((a !== -1) && (b !== -1) && (a < b)) {
+                        set = set.slice(0, a) + set.slice(b);
+                    }
+                }
+                return (set.length <= cap) ? set : set.slice(0, cap);
+            };
+
+
             // Build the final context with appropriate prompts.
             // The random draw is evaluated exactly once, and only when the brain
             // is not full, so task turns fall exactly where they always did.
@@ -2089,74 +1857,46 @@ Follow the format **perfectly**.
                 // Side effect on IS.agent, exactly as before
                 IS.agent = " ";
             }
-            const taskPrompt = full
-                ? prompt.forget[pov]
-                : skipTask
-                    ? ""
-                    // Low context = simple prompt, high context = advanced prompt.
-                    //
-                    // Under card delivery the advanced prompt is not an option at
-                    // ANY context size. It runs past 2000 characters on its own,
-                    // so the card cap cut it mid-rule and squeezed the directive
-                    // above it down to an empty <SYSTEM></SYSTEM> shell — and the
-                    // directive is the part that tells the agent who it is. Seen
-                    // live: thoughts written in third person, and an agent
-                    // writing about itself as though it were someone else.
-                    //
-                    // The context size is the wrong thing to measure here. The
-                    // card's budget is fixed at ~2000 however large the story
-                    // context is, so the constrained-context prompt is the right
-                    // one whenever the request travels on a card.
-                    : ((cacheEfficient() || (limit < 20000)) ? prompt.assign[pov] : prompt.choice[pov]);
+            // One set, or no task at all. Nothing chooses between versions of
+            // it, because there is only one version of it.
+            const taskPrompt = skipTask ? "" : measureInstructions();
             if (cacheEfficient()) {
-                // Anything added to the context here would be discarded, so the
-                // request goes on a card instead and the context is left alone.
+                // THE BRAIN IS RESERVED FIRST, THE INSTRUCTIONS FIT AROUND IT.
                 //
-                // What goes on the card is ORDERED BY IMPORTANCE, because a card
-                // entry is cut at its limit and the pieces are not equal.
-                // Measured: format rules 1463 characters, OPERATING ENVIRONMENT
-                // directive 709, brain block 99 — about 2270 against a card that
-                // holds roughly 2000. A plain concatenation drops the END, which
-                // is where "THE FIRST CHAR OF THE WHOLE OUTPUT MUST BE (" lives,
-                // and losing that line loses everything: the block parser has
-                // nothing left to find.
+                // It used to be the other way round: the instruction set took
+                // whatever it wanted and the brain was dropped WHOLE if it did
+                // not fit in the remainder. Once the set grew past about 1850
+                // that remainder was roughly 110 characters, so from the second
+                // stored thought onward the agent stopped seeing its own memory
+                // at all -- measured flat at 1858 characters for twelve turns
+                // running, whatever was in the brain.
                 //
-                // So the rules are reserved whole. The brain block goes first if
-                // space is short — it is context rather than instruction, and
-                // the agent's own brain card carries it anyway. The directive is
-                // then trimmed a LINE at a time from the end, keeping its
-                // opening bullets and its closing tag, so what survives is still
-                // well-formed rather than cut mid-sentence.
-                const CARD_CAP = 2000;
-                const tail = `${boundary.lower}${taskPrompt}`;
-                let head = String(prompt.directive[pov] || "");
-                let brainBlock = String(self || "");
-                const room = Math.max(0, CARD_CAP - tail.length);
-                if ((head.length + brainBlock.length) > room) {
-                    brainBlock = "";
-                }
-                if (head.length > room) {
-                    const lines = head.trim().split("\n").filter(l => l.trim() !== "</SYSTEM>");
-                    while ((lines.length > 1) && ((lines.join("\n").length + 12) > room)) {
-                        lines.pop();
-                    }
-                    // A directive trimmed to nothing but its own tags is worse
-                    // than no directive: it spends characters, says nothing, and
-                    // it is the FIRST thing on the card. Drop it instead.
-                    head = (lines.length > 1) ? `${lines.join("\n")}\n</SYSTEM>\n` : "";
-                }
-                // The rules are reserved whole or not sent at all. A half-written
-                // instruction set does not degrade gracefully: the model still
-                // answers, confidently, in a shape the parser cannot read, which
-                // costs a turn AND writes nonsense into a brain. A turn with no
-                // thought in it is strictly better.
-                const body = `${head}${brainBlock}${tail}`;
-                writeThoughtCard((taskPrompt && (body.length <= CARD_CAP)) ? body : "");
+                // That is the one thing Inner Self exists to provide. A
+                // character writing thoughts with no record of its own previous
+                // thoughts cannot help but repeat itself, and has nothing of
+                // its own to anchor to when the scene belongs to someone else.
+                // Instructions can shed a section. Memory cannot shed anything
+                // and still be memory.
+                const stamp = `// Inner Self ${OC_BUILD}\n`.length;
+                const CARD_ROOM = 2000 - stamp - boundary.lower.length;
+                const brainRaw = String(self || "");
+                // Reserve up to this much for the brain before the instructions
+                // are measured. Roughly five thoughts.
+                const BRAIN_RESERVE = 620;
+                const reserved = Math.min(brainRaw.length, BRAIN_RESERVE);
+                const set = skipTask ? "" : measureInstructions(CARD_ROOM - reserved);
+                const tail = (set === "") ? "" : `${boundary.lower}${set}`;
+                const brainBlock = (set === "") ? "" : fitBrain(brainRaw, CARD_ROOM - set.length);
+                writeThoughtCard((set === "") ? "" : `${tail}${brainBlock}`);
                 text = `${text.trim()}\n\n`;
             } else {
+                deactivateThoughtCard();
                 text = skipTask
                     ? `${nondirective()}${self}${text.trim()} `
-                    : `${prompt.directive[pov]}${self}${text.trim()}${boundary.lower}${taskPrompt}\n\n`;
+                    // The identity and point of view that the separate
+                    // OPERATING ENVIRONMENT directive used to carry are inside
+                    // the one set now, so nothing is prepended here any more.
+                    : `${self}${text.trim()}${boundary.lower}${taskPrompt}\n\n`;
             }
         }
         // ==================== CONTEXT TRUNCATION ====================
@@ -2690,6 +2430,29 @@ I hope you will have lots of fun!
             continue;
         }
         // ==================== VALUE EXTRACTION ====================
+        /**
+         * True when a sentence refers to the agent by name
+         * No RegEx, matching the trigger scan's style
+         * @param {string} str - The candidate thought sentence
+         * @returns {boolean} true if the agent's own name appears in it
+         */
+        const namesSelf = (str = "") => {
+            const lower = String(str).toLowerCase();
+            const name = String(agent.name || "").toLowerCase();
+            if ((name === "") || (lower === "")) {
+                return false;
+            }
+            for (let p = lower.indexOf(name); p !== -1; p = lower.indexOf(name, p + 1)) {
+                // Word boundaries, so "Nano" does not match "nanosecond"
+                if ([((0 < p) ? lower.charCodeAt(p - 1) : 0), (
+                    ((p + name.length) < lower.length)
+                    ? lower.charCodeAt(p + name.length) : 0
+                )].every(c => ((c < 97) || (122 < c)))) {
+                    return true;
+                }
+            }
+            return false;
+        };
         // Extract and clean the value
         const value = (
             (str.split(delimiter, 2)[1] || "")
@@ -2699,6 +2462,16 @@ I hope you will have lots of fun!
         );
         if (!/[a-z0-9A-Z]/.test(value) || /[\u4e00-\u9fff]/.test(value)) {
             // Skip empty or non-latin values because DeepSeek is dumb
+            continue;
+        } else if (value.includes(" ") && namesSelf(value)) {
+            // NOT THIS AGENT'S THOUGHT.
+            //
+            // A first person thought does not refer to itself by name. When
+            // one does, it is another character's interiority written under
+            // this agent's heading, and storing it corrupts the brain
+            // permanently -- the wrong memory then goes back into the
+            // context every turn and compounds. Losing one turn's thought
+            // is the cheaper mistake by a wide margin.
             continue;
         } else if (!value.includes(" ")) {
             // ==================== RENAME OPERATION ====================
