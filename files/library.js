@@ -2093,8 +2093,21 @@ Follow the format **perfectly**.
                 ? prompt.forget[pov]
                 : skipTask
                     ? ""
-                    // Low context = simple prompt, high context = advanced prompt
-                    : ((limit < 20000) ? prompt.assign[pov] : prompt.choice[pov]);
+                    // Low context = simple prompt, high context = advanced prompt.
+                    //
+                    // Under card delivery the advanced prompt is not an option at
+                    // ANY context size. It runs past 2000 characters on its own,
+                    // so the card cap cut it mid-rule and squeezed the directive
+                    // above it down to an empty <SYSTEM></SYSTEM> shell — and the
+                    // directive is the part that tells the agent who it is. Seen
+                    // live: thoughts written in third person, and an agent
+                    // writing about itself as though it were someone else.
+                    //
+                    // The context size is the wrong thing to measure here. The
+                    // card's budget is fixed at ~2000 however large the story
+                    // context is, so the constrained-context prompt is the right
+                    // one whenever the request travels on a card.
+                    : ((cacheEfficient() || (limit < 20000)) ? prompt.assign[pov] : prompt.choice[pov]);
             if (cacheEfficient()) {
                 // Anything added to the context here would be discarded, so the
                 // request goes on a card instead and the context is left alone.
@@ -2127,9 +2140,18 @@ Follow the format **perfectly**.
                     while ((lines.length > 1) && ((lines.join("\n").length + 12) > room)) {
                         lines.pop();
                     }
-                    head = `${lines.join("\n")}\n</SYSTEM>\n`;
+                    // A directive trimmed to nothing but its own tags is worse
+                    // than no directive: it spends characters, says nothing, and
+                    // it is the FIRST thing on the card. Drop it instead.
+                    head = (lines.length > 1) ? `${lines.join("\n")}\n</SYSTEM>\n` : "";
                 }
-                writeThoughtCard(taskPrompt ? `${head}${brainBlock}${tail}` : "");
+                // The rules are reserved whole or not sent at all. A half-written
+                // instruction set does not degrade gracefully: the model still
+                // answers, confidently, in a shape the parser cannot read, which
+                // costs a turn AND writes nonsense into a brain. A turn with no
+                // thought in it is strictly better.
+                const body = `${head}${brainBlock}${tail}`;
+                writeThoughtCard((taskPrompt && (body.length <= CARD_CAP)) ? body : "");
                 text = `${text.trim()}\n\n`;
             } else {
                 text = skipTask
